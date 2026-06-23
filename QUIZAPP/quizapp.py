@@ -2,14 +2,12 @@
 import streamlit as st
 import json
 import os
+from google import genai
 from dotenv import load_dotenv
 
-# from dotenv import API_KEY
 load_dotenv()  # load all the environment variables from the .env file
-
-from openai import OpenAI
-OpenAI.api_key=os.getenv("OPENAI_API_KEY")
-client = OpenAI()
+api_key=os.getenv("GOOGLE_API_KEY")
+client = genai.Client(api_key=api_key)
 
 @st.cache_data
 def fetch_questions(text_content, quiz_level):
@@ -24,7 +22,7 @@ def fetch_questions(text_content, quiz_level):
                     "c": "choice here3",
                     "d": "choice here4",
                 },
-                "correct": "a", 
+                "correct": "correct choice option",
             },
             {
                 "mcq": "multiple choice question",
@@ -34,7 +32,7 @@ def fetch_questions(text_content, quiz_level):
                     "c": "choice here",
                     "d": "choice here",
                 },
-                "correct": "b",
+                "correct": "correct choice option",
             },
             {
                 "mcq": "multiple choice question",
@@ -44,7 +42,7 @@ def fetch_questions(text_content, quiz_level):
                     "c": "choice here",
                     "d": "choice here",
                 },
-                "correct": "c",
+                "correct": "correct choice option",
             },
         ]
     }
@@ -58,34 +56,36 @@ def fetch_questions(text_content, quiz_level):
     Ensure to make an array of 3 MCQs referring the following response json.
     Here is the RESPONSE_JSON:
 
+    
     {RESPONSE_JSON}
+
     """
 
-    # json.dumps converts the dictionary into a proper double-quoted JSON string
     formatted_template = PROMPT_TEMPLATE.format(
-        text_content=text_content, 
-        quiz_level=quiz_level, 
-        RESPONSE_JSON=json.dumps(RESPONSE_JSON)
+        text_content=text_content, quiz_level=quiz_level, RESPONSE_JSON=RESPONSE_JSON
     )
 
    # Make API request
     try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo", 
-            messages=[
-                {"role": "user", "content": formatted_template}
-            ]
+        response = client.models.generate_content(
+            model='gemini-2.5-flash', 
+            contents=formatted_template
         )
-        
-        # Extract response JSON
-        extracted_response = response.choices[0].message.content
-        print(extracted_response)
-        
-        return json.loads(extracted_response).get("mcqs", [])
-        
+        response_text = response.text.strip()
     except Exception as e:
-        print(f"Error occurred: {e}")
-        # Return an empty list if there's an API or JSON error
+        st.error(f"API Error occurred: {e}")
+        return []
+
+    if response_text.startswith("```json"):
+        response_text = response_text.replace("```json", "").replace("```", "").strip()
+    elif response_text.startswith("```"):
+        response_text = response_text.replace("```", "").strip()
+        
+    try:
+        data = json.loads(response_text)
+        return data.get("mcqs", [])
+    except Exception as e:
+        st.error("Failed to parse quiz data. Please try again.")
         return []
 
 def main():
@@ -108,18 +108,13 @@ def main():
     if 'quiz_generated' not in session_state:
         session_state.quiz_generated = False
         
-    # Track if Generate Quiz button is clicked
+        # Track if Generate Quiz button is clicked
     if not session_state.quiz_generated:
         session_state.quiz_generated = st.button("Generate Quiz")
 
     if session_state.quiz_generated:
         # Define Questions and options
         questions = fetch_questions(text_content=text_content, quiz_level=quiz_level_lower)
-
-        # Safety check in case the API returned an empty list due to an error
-        if not questions:
-            st.error("Could not generate questions. Please check your API key or try a different text.")
-            return
 
         # Display questions and radio buttons
         selected_options = []
@@ -128,7 +123,6 @@ def main():
             options = list(question["options"].values())
             selected_option = st.radio(question["mcq"], options, index=None)
             selected_options.append(selected_option)
-            # Find the correct answer text based on the 'correct' key (a, b, c, or d)
             correct_answers.append(question["options"][question["correct"]])
 
         # Submit button
@@ -145,6 +139,7 @@ def main():
                     if selected_option == correct_option:
                         marks += 1
             st.subheader(f"You scored {marks} out of {len(questions)}")
+
 
 if __name__ == "__main__":
     main()
